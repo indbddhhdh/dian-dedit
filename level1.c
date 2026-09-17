@@ -19,7 +19,7 @@ int main()
 	getmaxyx(stdscr,y_max,x_max);
 	// 移动光标
 	// 尚未区分长短按
-	while((ch = getch()) != 27)
+	while((ch = getch()) != 17)
 	{
 		switch(ch)
 		{
