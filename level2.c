@@ -369,6 +369,8 @@ int main(int argc,char *argv[])
 			// 难点：1.如何判断是否x触边；2.如何处理中文和其他字符字节大小不同，导致的重新输出问题。
 			// 注意：做的是软换行，所以只需要考虑y方向上的文本输出变换
 		// 3.根据光标位置移动文本显示范围
+			// 由于是软换行，只有在涉及y方向时才需要考虑文本的变换输出
+			// 由于中文占两个屏幕长度单位，所以光标移动还需要考虑中文。不过之后再说吧，万一能自动跳呢？
 
 		// 先初始化一个数组
 		lchar *arr = (lchar*)malloc(1024 * sizeof(lchar));
@@ -387,6 +389,13 @@ int main(int argc,char *argv[])
 		{
 			if (n == 1024)
 			{
+				// 补丁：判断文件是否读完
+				if (feof(file))
+				{
+					len += 1024;
+					break;
+				} //不能直接break，这会导致有1kb的长度没记录。
+
 				//扩大数组
 				freq++;
 				Start += 1024;
@@ -421,7 +430,19 @@ int main(int argc,char *argv[])
 
 		// 在执行while前得先输出一次，先把没初始化好的基本量初始化
 		int yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx); // yx_len是最大行数
+		if (yx_len == -1)
+		{
+			endwin();
+			perror("realloc");
+			return 1;
+		}
 		int row_index = read_txt(arr,len,x_max,&row_counter);
+		if (row_index == -1)
+		{
+			endwin();
+			perror("realloc");
+			return 1;
+		}
 
 		while ((ch = getch()) != 17)
 		{
@@ -434,20 +455,29 @@ int main(int argc,char *argv[])
 				x_max = new_x_max;
 				y_max = new_y_max;
 				row_index = read_txt(arr,len,x_max,&row_counter);
+				if (row_index == -1)
+				{
+					endwin();
+					perror("realloc");
+					return 1;
+				}
 
 				// 重新输出文本内容
 				yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+				if (yx_len == -1)
+				{
+					endwin();
+					perror("realloc");
+					return 1;
+				}
 			}
-//			else if() // 存储文件功能键的实现
-//			{
-//
-//			}
 			else // 控制光标移动，重新输出文本内容
 			{
 				// 控制光标移动，记得改判断条件
 				switch(ch) // 当光标超过边界时，需要重新输出文本内容
 				{
-				case KEY_UP: // 这样会不会直接插入中文内部啊？后面调试有bugger来这修
+				case KEY_UP: // 这样会不会直接插入中文内部啊？后面调试有bugger来这修——看来是会的。
+					//
 					if (y > 0)
 					{
 						y--;
@@ -466,6 +496,12 @@ int main(int argc,char *argv[])
 						Where_Start = row_counter[Cur_True_Location - 1];
 						Cur_True_Location--;
 						yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+						if (yx_len == -1)
+						{
+							endwin();
+							perror("realloc");
+							return 1;
+						}
 						if (x > ylinkx[y]) x = ylinkx[y];
 					}
 					break;
@@ -485,14 +521,65 @@ int main(int argc,char *argv[])
 						Where_Start = row_counter[Cur_True_Location - yx_len + 2];
 						Cur_True_Location++;
 						yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+						if (yx_len == -1)
+						{
+							endwin();
+							perror("realloc");
+							return 1;
+						}
 					}
 					if (x > ylinkx[y]) x = ylinkx[y];
 					break;
-				case KEY_LEFT: // 可以实现通过左右键上下移动的功能，后面有空再写
+				case KEY_LEFT: // 还需要写水平移动的功能
 					if (x > 0)x--;
+					else// 需要先判断是否顶格
+					{
+						if (y > 0)
+						{
+						x = ylinkx[y - 1];
+						y--;
+						Cur_True_Location--;
+						}
+						else
+						{
+							if (Cur_True_Location == 0) break;
+							Where_Start = row_counter[Cur_True_Location - 1];
+							Cur_True_Location--;
+							yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+							if (yx_len == -1)
+							{
+								endwin();
+								perror("realloc");
+								return 1;
+							}
+							x = ylinkx[y - 1];
+						}
+					}
 					break;
 				case KEY_RIGHT:
 					if (x < ylinkx[y])x++;
+					else
+					{
+						if (y < (yx_len - 1))
+						{
+							y++;
+							Cur_True_Location++;
+						}
+						else if ((y == yx_len - 1) && (Cur_True_Location == (row_index - 1))) break;
+						else if	((y == yx_len - 1) && (Cur_True_Location < (row_index - 1)))
+						{
+							Where_Start = row_counter[Cur_True_Location - yx_len + 2];
+							Cur_True_Location++;
+							yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+							if (yx_len == -1)
+							{
+								endwin();
+								perror("realloc");
+								return 1;
+							}
+						}
+						x = 0;
+					}
 					break;
 				}
 				move(y,x);
@@ -507,6 +594,7 @@ int main(int argc,char *argv[])
 	else
 	{
 		// 提示用户没有传文件
+		printw("当前没有文件传入");
 
 		// 退出程序
 		int ch;
