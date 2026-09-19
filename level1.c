@@ -38,12 +38,12 @@ int main(int argc,char *argv[])
 		// 储存一行的字符串
                 char string[1025];
 		int n;
+		int len = 0;
 		int Row_Location,Column_Location;
 		while((n = fread(arr,1,1024,file)) != 0)
 		{
 			// 记录停下的位置
 			arr[n] = '\0';
-			int len = 0;
 			for(int i = 0;i < n;i++)
 			{
 			// 不能用printf，要用printw,且printw需要refresh才能将内容刷新到屏幕
@@ -71,6 +71,12 @@ int main(int argc,char *argv[])
 				}
 			}
 		}
+		if (len > 0) 
+		{
+			string[len] = '\0';
+			printw("%s", string);
+		}
+
 
 
 		fclose(file);
