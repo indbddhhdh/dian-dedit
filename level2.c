@@ -20,9 +20,10 @@ typedef struct
 int check_type(lchar c)
 {
 	if (c < 0x80) return 1;
-    	if (c < 0xE0) return 2;
+	if (c < 0xE0) return 2;
 	if (c < 0xF0) return 3;
-	return 4;
+	if (c < 0xF5) return 4;
+	else return -1;
 }
 
 int get_width(lchar c)
@@ -330,6 +331,313 @@ int read_txt(lchar *arr,int len,int x_max,int **row_counter)
 	return row_index; // 文本的y轴长度
 }
 
+
+
+// level2.2代码块内容
+// 要求：1.实现一些基本的交互功能；2.保留方向键（应该是保留2.1的功能）
+// 或许可拓展：既然有修改那就有保存吧，ctrl + s两键保存更改。
+// 思路：这些交互本质上是修改内容。而修改了内容，要么是在show_txt阶段，要么就是直接修改了arr，显然后者更好实现。那么肯定有部分需要重新输出。但全部重新输出显然更简单。
+// 首先否认修改arr为链表，输入输出时间成本过高，那依旧只能是数组。
+// 交互可分为功能键和普通输入。后者需要定义一个变量来接收用户输入，并翻译成CharInfo数组。
+// 绕不开中文，让用户忍一忍吧。。。
+
+// 接收用户输入的字符，返回字符长度
+// 还需要定义一个数组来接收
+// int Get_Input(lchar **User_Input,int ch,int *Input_len)
+// {
+// 	Input_len++;
+
+// 	// 扩容数组
+// 	lchar *tmp = realloc(*User_Input,Input_len * sizeof(lchar));
+// 	if(tmp == NULL)
+// 	{
+// 		free(*User_Input);
+// 		perror("realloc failed");
+// 		return -1;// 如果接收到-1则说明扩容失败
+// 	}
+// 	*User_Input = tmp;
+// 	(*User_Input)[Input_len - 1] = (lchar)ch;
+// } // 不对，好像不用这玩意
+
+// 在光标位置插入字符
+// 后移逻辑，所以起始输出位置不需要变，只需要挪arr,所以需要传入arr、有效长度、实际长度(用于判断是否需要扩容)
+int InsertString(lchar **arr,int *len,int *freq,int Cur_True_Location,int **row_counter,int *row_index,int *x,int *y,int ch,int x_max,int y_max,int *Where_Start)
+{
+	// 先判断是否需要扩容
+	while(*len + 1 > (*freq) * 1024)
+	{
+		(*freq)++;
+		lchar *tmp = expand_arr(*arr,*freq); // 后续可优化成一个一个字符地扩大。
+
+		// 判断是否扩容成功
+		if (tmp == NULL)
+		{
+			endwin();
+			perror("realloc failed");
+			return -1;
+		}
+		*arr = tmp;
+	}
+	(*len)++;
+
+	// 接下来需要挪动arr
+
+	// 难点：如何知道插入位置右侧字符对应arr的首字节？
+
+	// 方案A：扩展row_counter数组。新定义一个类，存储每个字符首字节对应arr的下标、在每一行的x轴位置、字节数，以及一个指向下个元素的指针。这样能够构成一个类似哈希表的结构，即数组+元素为链表
+	// 否定，不用修改，因为row_counter已经提供每一行的定位作为锚点
+	// 方案B:光标移动时先移动，再往右判断该字节是否有身份标签，若没有则继续往右找
+	// 否定，首先这需要重新优化check_type函数，而且row_counter完全可以配合check_type,get_width来定位该字符的下标,这个方法更好。
+	// 方案C：因为光标x轴坐标是用字符屏幕长度来定位的，所以可以以首元素首字节为基准，用get_width获得长度并累加，同时用chec_type来推进下标移动，当当前长度等于光标坐标时判正。
+	// 好处：1.实现元素定位 2.光标移动能兼容中文。
+
+	// 需要当前行数，光标x坐标，还有记录数组。更新参数列表,注意数组时需要更新的，还有文件最大行、光标坐标也需要更新
+
+	// 记录光标右侧字符的首字节下标
+	int Right_index = (*row_counter)[Cur_True_Location];
+	int Right_Location = 0; // x轴坐标
+	while (Right_Location != *x) // 记得更新光标移动逻辑，兼容中文
+	{
+		Right_Location += get_width((*arr)[Right_index]);
+		Right_index += check_type((*arr)[Right_index]);
+	}
+
+	int move_index = *len - 1;
+
+	// 移动数组
+	while(move_index > Right_index) // 需要额外定义一个量作为当前移动下标
+	{
+		(*arr)[move_index] = (*arr)[move_index - 1];
+		move_index--;
+	}
+
+	// 插入字符
+	// 判断是否为换行符，等下先输出看看他的ascii值
+	if (ch == 10)
+	{
+		(*arr)[Right_index] = '\n';
+		*x = 0;
+		if ((*y) < y_max - 1)
+		{
+			(*y)++;
+			return 1;
+		}
+		else
+		{
+			return -2; // whereStart需要动,还有Cur_True_Location
+		}
+	}
+	else (*arr)[Right_index] = (lchar)ch;
+
+	// 更新x，y坐标，这个等下再实现
+	// 由于输入可能会有中文，所以这部分放到外面。
+	// 后续直接重建表+重新输出即可
+
+	// 回来了，移动光标
+	int length = check_type(ch);
+
+	if (length == -1)return 0;// 非字符首字节
+	else
+	{
+		if ((*x + get_width(ch) > x_max) && (*y == y_max - 1))// 还需要行长度和屏幕行最大值
+		{
+			*x = 0;
+			return -2; // whereStart需要动
+		}
+		else if ((*x + get_width(ch) > x_max) && (*y < y_max))
+		{
+			*x = 0;
+			(*y)++;
+			return 1;
+		}
+		else
+		{
+			*x += get_width(ch);
+			return -3;
+		} 
+	}
+}
+
+// 删除光标前字符
+// 如果删除起始输出位置还需要更新Where_Start
+// 还需要释放多余空间
+// 测得ascii = 263
+// 这里出现的bug最多，需要重新梳理一边逻辑
+int Backspace(int *Where_Start,lchar **arr,int *freq,int *len,int Cur_True_Location,int **row_counter,int *x,int y)
+{
+	// 防止在文章开头
+	if (((*x) == 0) && (Cur_True_Location == 0)) return -2;
+
+	// 记录光标左侧字符的首字节下标
+	int Left_index = (*row_counter)[Cur_True_Location];
+	int Left_Location = 0; // x轴坐标
+	while (1) // 记得更新光标移动逻辑，兼容中文
+	{
+		if((Left_Location + get_width((*arr)[Left_index])) < *x)
+		{
+			Left_Location += get_width((*arr)[Left_index]);
+			Left_index += check_type((*arr)[Left_index]);
+		}
+		else break;
+	}
+
+	// 防止在一行开头
+	if (((*x) == 0) && (Cur_True_Location > 0))
+	{
+		Left_index = (*row_counter)[Cur_True_Location - 1];
+		Left_Location = 0;
+	// 从上一行开始数
+
+		while ((Left_index + check_type((*arr)[Left_index])) < (*row_counter)[Cur_True_Location]) // 要找到光标左侧的第一个字节的下标，需要注意是不是换行符 // 不对，就算是换行符也能正常运算
+		{
+				Left_Location += get_width((*arr)[Left_index]);
+				Left_index += check_type((*arr)[Left_index]);
+		}
+	}
+
+	// 记录被删去的字符
+	int bk_width = get_width((*arr)[Left_index]);
+	int bk_type = check_type((*arr)[Left_index]);
+
+	int move_index = Left_index;
+	while((move_index + bk_type) < (*len - 1)) // 只能是小于，要考虑删掉的是最后一个字符
+	{
+		// 因为arr在变化，所以不能简单用check_type(arr[Left_index]），要用别的变量记录下来
+		(*arr)[move_index] = (*arr)[move_index + bk_type];
+		move_index++;
+	}
+
+	// 这个释放需要放到移动之后，因为要确定要删掉多少字节，而且要防止内容丢失。
+	// 判断是否需要释放,为避免计算混乱，一次释放1024个空间
+	if(*len - bk_type < (*freq - 1) * 1024)
+	{
+		(*freq)--;
+		lchar *tmp = realloc(*arr,(*freq) * 1024);
+		if (tmp == NULL)
+		{
+			perror("malloc fail");
+			return -1; // 报错信息
+		}
+		*arr = tmp;
+	}
+	*len -= bk_type;
+
+	// 考虑到可能存在值冲突，正数部分全部由bk_width
+
+	// 同样需要移动光标，后面再实现。
+	if (((*x) == 0) && (Cur_True_Location > 0) && (y > 0))
+	{
+		*x = Left_Location;
+		return -3;
+	}
+	else if (((*x) == 0) && (Cur_True_Location > 0) && (y == 0))
+	{
+		*Where_Start = (*row_counter)[Cur_True_Location - 1];
+		*x = Left_Location;
+		// y不用动
+		return -4;
+	}
+	return bk_width; // 否则则按照字符长度变化
+	// 以及是否需要修改Where_Start
+}
+
+
+// 删除光标后字符
+// 测得ascii = 330
+int Del(int *Where_Start,lchar **arr,int *freq,int *len,int Cur_True_Location,int **row_counter,int *x)
+{
+	// 记录光标右侧字符的首字节下标
+	int Right_index = (*row_counter)[Cur_True_Location];
+	int Right_Location = 0; // x轴坐标
+	while (Right_Location != *x) // 记得更新光标移动逻辑，兼容中文
+	{
+		Right_Location += get_width((*arr)[Right_index]);
+		Right_index += check_type((*arr)[Right_index]);
+	}
+
+	// 判断是否需要移动，防止光标后没字符
+	if(Right_index == *len) return 1;
+
+	// 记录被删去的字符
+	int del_width = get_width((*arr)[Right_index]);
+	int del_type = check_type((*arr)[Right_index]);
+
+
+	// 移动逻辑和删除光标前相同
+
+	int move_index = Right_index;
+	while((move_index + del_type) < (*len - 1)) 
+	{
+		(*arr)[move_index] = (*arr)[move_index + del_type];
+		move_index++;
+	}
+
+	if(*len - del_type < (*freq - 1) * 1024)
+	{
+		(*freq)--;
+		lchar *tmp = realloc(*arr,(*freq) * 1024);
+		if (tmp == NULL)
+		{
+			perror("malloc fail");
+			return 1;
+		}
+		*arr = tmp;
+	}
+
+	*len -= del_type;
+	return 0;
+
+	// 同样需要移动光标，后面再实现。
+	// 以及是否需要修改Where_Start
+
+}
+
+// 换行,本质是在指定位置加一个换行符
+// 突然发现和插入是同一个函数
+
+// 为了重写光标移动逻辑，需要封装一个判断x轴移哪的函数
+void Where_x_Going_to(int *x,int Go_Which_Row,int current_row,int *row_counter,lchar *arr,int ch)
+{
+	int coord = 0;
+	int assit_index = row_counter[Go_Which_Row];
+	if ((Go_Which_Row != current_row) && ((ch == KEY_DOWN) || (ch == KEY_UP)))
+	{
+		while (coord < *x)
+		{
+			coord += get_width(arr[assit_index]);
+			assit_index += check_type(arr[assit_index]); 
+		}
+		*x = coord;
+	}
+	else if ((Go_Which_Row == current_row) && (ch == KEY_RIGHT))
+	{
+		while (coord <= *x)
+		{
+			coord += get_width(arr[assit_index]);
+			assit_index += check_type(arr[assit_index]); 
+		}
+		*x = coord;
+	}
+	else
+	{
+		while (coord < *x)
+		{
+			if(coord + get_width(arr[assit_index]) == *x)
+			{
+				*x = coord;
+				break;
+			}
+			coord += get_width(arr[assit_index]);
+			assit_index += check_type(arr[assit_index]); 
+		}
+	}
+}
+
+
+
+
+
+
 int main(int argc,char *argv[])
 {
 	//初始化
@@ -406,8 +714,8 @@ int main(int argc,char *argv[])
 				if (tmp == NULL)
 				{
 					endwin();
-                        		perror("realloc failed");
-                        		return 1;
+					perror("realloc failed");
+					return 1;
 				}
 				arr = tmp;
 			}
@@ -427,6 +735,13 @@ int main(int argc,char *argv[])
 
 		// 光标的实际行数
 		int Cur_True_Location = 0;
+
+		// 功能键统一回收
+		int inter;
+
+		// // 用户输入量
+		// lchar *User_Input = NULL;
+		// int	Input_len = 0;
 
 		// 在执行while前得先输出一次，先把没初始化好的基本量初始化
 		int yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx); // yx_len是最大行数
@@ -476,72 +791,23 @@ int main(int argc,char *argv[])
 				// 控制光标移动，记得改判断条件
 				switch(ch) // 当光标超过边界时，需要重新输出文本内容
 				{
-				case KEY_UP: // 这样会不会直接插入中文内部啊？后面调试有bugger来这修——看来是会的。
-					//
-					if (y > 0)
-					{
-						y--;
-						Cur_True_Location--;
-
-						// 需要考虑不能超出文本范围，所以要判断x坐标要不要移动
-						if (x > ylinkx[y]) x = ylinkx[y];
-					}
-					else // 继续往上，需要计算起始坐标量
-					{
-						// 计算,需要注意，还要判断是否在文本开头位置
-						// 那还要加一个变量判断当前光标对应文本的行数
-						// 还少了一个量用来记录有多少个字符，我真服了。
-						// 否定，应该是要存字节
-						if (Cur_True_Location == 0) break;
-						Where_Start = row_counter[Cur_True_Location - 1];
-						Cur_True_Location--;
-						yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
-						if (yx_len == -1)
-						{
-							endwin();
-							perror("realloc");
-							return 1;
-						}
-						if (x > ylinkx[y]) x = ylinkx[y];
-					}
-					break;
-				case KEY_DOWN: // 需要注意，如果已到文档底部，那用户再按下键应该没有任何操作.
-					if (y < yx_len - 1)
-					{
-						y++;
-						Cur_True_Location++;
-					}// 所以刚刚定义的那个实际行数其实有问题。
-					// 或许可以试试输出完后停止输出然后继续阅读？
-					// 否认，这样每次调用函数都需要重新阅读，程序会冗杂。
-					// 定义一个阅读函数。
-					// 会存在一个如果最后一行为幻影行则光标会在屏幕丢失的问题，需要回到特判幻影行的位置解决。
-					else if ((y == yx_len - 1) && (Cur_True_Location == (row_index - 1))) break;
-					else if	((y == yx_len - 1) && (Cur_True_Location < (row_index - 1)))
-					{
-						Where_Start = row_counter[Cur_True_Location - yx_len + 2];
-						Cur_True_Location++;
-						yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
-						if (yx_len == -1)
-						{
-							endwin();
-							perror("realloc");
-							return 1;
-						}
-					}
-					if (x > ylinkx[y]) x = ylinkx[y];
-					break;
-				case KEY_LEFT: // 还需要写水平移动的功能
-					if (x > 0)x--;
-					else// 需要先判断是否顶格
-					{
+					case KEY_UP: // 这样会不会直接插入中文内部啊？后面调试有bugger来这修——看来是会的。
+						//
 						if (y > 0)
 						{
-						x = ylinkx[y - 1];
-						y--;
-						Cur_True_Location--;
+							y--;
+							Cur_True_Location--;
+
+							// 需要考虑不能超出文本范围，所以要判断x坐标要不要移动
+							if (x > ylinkx[y]) x = ylinkx[y];
+							else Where_x_Going_to(&x,Cur_True_Location,Cur_True_Location + 1,row_counter,arr,ch);
 						}
-						else
+						else // 继续往上，需要计算起始坐标量
 						{
+							// 计算,需要注意，还要判断是否在文本开头位置
+							// 那还要加一个变量判断当前光标对应文本的行数
+							// 还少了一个量用来记录有多少个字符，我真服了。
+							// 否定，应该是要存字节
 							if (Cur_True_Location == 0) break;
 							Where_Start = row_counter[Cur_True_Location - 1];
 							Cur_True_Location--;
@@ -552,19 +818,20 @@ int main(int argc,char *argv[])
 								perror("realloc");
 								return 1;
 							}
-							x = ylinkx[y - 1];
+							if (x > ylinkx[y]) x = ylinkx[y];
+							else Where_x_Going_to(&x,Cur_True_Location,Cur_True_Location + 1,row_counter,arr,ch);
 						}
-					}
-					break;
-				case KEY_RIGHT:
-					if (x < ylinkx[y])x++;
-					else
-					{
-						if (y < (yx_len - 1))
+						break;
+					case KEY_DOWN: // 需要注意，如果已到文档底部，那用户再按下键应该没有任何操作.
+						if (y < yx_len - 1)
 						{
 							y++;
 							Cur_True_Location++;
-						}
+						}// 所以刚刚定义的那个实际行数其实有问题。
+						// 或许可以试试输出完后停止输出然后继续阅读？
+						// 否认，这样每次调用函数都需要重新阅读，程序会冗杂。
+						// 定义一个阅读函数。
+						// 会存在一个如果最后一行为幻影行则光标会在屏幕丢失的问题，需要回到特判幻影行的位置解决。
 						else if ((y == yx_len - 1) && (Cur_True_Location == (row_index - 1))) break;
 						else if	((y == yx_len - 1) && (Cur_True_Location < (row_index - 1)))
 						{
@@ -578,9 +845,150 @@ int main(int argc,char *argv[])
 								return 1;
 							}
 						}
-						x = 0;
-					}
-					break;
+						if (x > ylinkx[y]) x = ylinkx[y];
+						else Where_x_Going_to(&x,Cur_True_Location,Cur_True_Location - 1,row_counter,arr,ch);
+						break;
+					case KEY_LEFT: // 还需要写水平移动的功能
+						if (x > 0)Where_x_Going_to(&x,Cur_True_Location,Cur_True_Location,row_counter,arr,ch);
+						else// 需要先判断是否顶格
+						{
+							if (y > 0)
+							{
+							x = ylinkx[y - 1];
+							y--;
+							Cur_True_Location--;
+							}
+							else
+							{
+								if (Cur_True_Location == 0) break;
+								Where_Start = row_counter[Cur_True_Location - 1];
+								Cur_True_Location--;
+								yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+								if (yx_len == -1)
+								{
+									endwin();
+									perror("realloc");
+									return 1;
+								}
+								x = ylinkx[y];
+							}
+						}
+						break;
+					case KEY_RIGHT:
+						if (x < ylinkx[y])Where_x_Going_to(&x,Cur_True_Location,Cur_True_Location,row_counter,arr,ch);
+						else
+						{
+							if (y < (yx_len - 1))
+							{
+								y++;
+								Cur_True_Location++;
+							}
+							else if ((y == yx_len - 1) && (Cur_True_Location == (row_index - 1))) break;
+							else if	((y == yx_len - 1) && (Cur_True_Location < (row_index - 1)))
+							{
+								Where_Start = row_counter[Cur_True_Location - yx_len + 2];
+								Cur_True_Location++;
+								yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+								if (yx_len == -1)
+								{
+									endwin();
+									perror("realloc");
+									return 1;
+								}
+							}
+							x = 0;
+						}
+						break;
+					case 263:
+						inter = Backspace(&Where_Start,&arr,&freq,&len,Cur_True_Location,&row_counter,&x,y);
+						if (inter == -1)
+						{
+							endwin();
+							perror("Backspace");
+							return 1;
+						}
+						if (inter == -2)break;
+						
+						// 更新文本参数
+						row_index = read_txt(arr,len,x_max,&row_counter);
+
+						// 光标移动
+						if (inter == -3)// 不需要改变wherestart
+						{
+							y--;
+							Cur_True_Location--;
+							yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+							if (yx_len == -1)
+							{
+								endwin();
+								perror("realloc");
+								return 1;
+							}
+						}
+						else if(inter == -4)
+						{
+							Cur_True_Location--;
+							yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+							if (yx_len == -1)
+							{
+								endwin();
+								perror("realloc");
+								return 1;
+							}
+						}
+						else
+						{
+							x -= inter;
+							yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+							if (yx_len == -1)
+							{
+								endwin();
+								perror("realloc");
+								return 1;
+							}
+						}
+
+						break;
+					case 330:
+						// 删后面的应该不用移动光标
+						Del(&Where_Start,&arr,&freq,&len,Cur_True_Location,&row_counter,&x);
+						row_index = read_txt(arr,len,x_max,&row_counter);
+						yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+						if (yx_len == -1)
+							{
+								endwin();
+								perror("realloc");
+								return 1;
+							}
+						break;
+					default:
+						inter = InsertString(&arr,&len,&freq,Cur_True_Location,&row_counter,&row_index,&x,&y,ch,x_max,y_max,&Where_Start);
+
+						if (inter == -1)
+						{
+							endwin();
+							perror("InsertString");
+							return 1;
+						}
+						row_index = read_txt(arr,len,x_max,&row_counter);
+
+						// 光标移动
+						// 如果输入长文本咋整？要先整一个预输入数组吗？——学到一个新知识，只有首字节有身份标签,果然还是得修改check_type的逻辑
+						if (inter == -2)
+						{
+							Where_Start = row_counter[Cur_True_Location - yx_len + 2];
+							Cur_True_Location++;
+							y++;
+						}
+
+						yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+						if (yx_len == -1)
+						{
+							endwin();
+							perror("realloc");
+							return 1;
+						}
+						break;
 				}
 				move(y,x);
 				refresh();
