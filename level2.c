@@ -596,7 +596,7 @@ int Del(int *Where_Start,lchar **arr,int *freq,int *len,int Cur_True_Location,in
 // 突然发现和插入是同一个函数
 
 // 为了重写光标移动逻辑，需要封装一个判断x轴移哪的函数
-void Where_x_Going_to(int *x,int Go_Which_Row,int current_row,int *row_counter,lchar *arr,int ch)
+void Where_x_Going_to(int *x,int Go_Which_Row,int current_row,int *row_counter,lchar *arr,int ch,int *ylinkx)
 {
 	int coord = 0;
 	int assit_index = row_counter[Go_Which_Row];
@@ -604,6 +604,11 @@ void Where_x_Going_to(int *x,int Go_Which_Row,int current_row,int *row_counter,l
 	{
 		while (coord < *x)
 		{
+			if (coord >= ylinkx[Go_Which_Row])
+			{ 
+				*x = ylinkx[Go_Which_Row];
+				return;
+			}
 			coord += get_width(arr[assit_index]);
 			assit_index += check_type(arr[assit_index]); 
 		}
@@ -634,6 +639,64 @@ void Where_x_Going_to(int *x,int Go_Which_Row,int current_row,int *row_counter,l
 }
 
 
+// level2.3代码内容
+// 需求：状态栏，包含当前编辑器状态，当前文件名，文件是否存在为保存修改，光标坐标
+// 分析：当前编辑器状态是按下功能键进入，这个好说。而是否保存会涉及到每次修改都会进入未修改状态
+// 思路：对switch环节的交互部分外面再套一层if，如果ch == 19（即ctrl + s）则为已保存，若为其他则未保存
+// 思路其二：由于该状态栏不需要交互，故可以直接在屏幕最下方单独划一片区域直接打印输出。还需要注意当前窗口大小能不能支持打印输出。
+// 所以似乎不需要额外的函数来实现？还是写一个吧。
+int win_state(int y_max,int x_max,int x,int y,int ch,char** argv,int name_len,int is_change,int is_mode_change,int *choose_which)
+{	
+	// 判断需要显示的宽度
+	// 用一个动态数组存储需要显示的内容，由于文件名在程序运行时已定，故只需要得到一次。所以这个数组定义在main函数内，先进行一次文件名获取。
+	
+	// if判断要进哪个模式
+	// 等等，完全可以先规定各个内容在哪一块实现，这样状态栏长度可以固定（如果不考虑显示光标坐标）,那么就不需要动态数组存储需要显示的内容了。
+	// 已知编辑器状态有NORMAL/SEARCH/RELPACE/UNSAVED这几种，则此处最多7个屏幕长度。而最后一种只需要在退出没保存时显示;默认NORMA。判断直接写后面那里
+	char *mode[4] = {"NORMAL ","SEARCH ","REPLACE","UNSAVED "};
+	// 通过下标·定义一个变量用来选择哪一个，默认为0，要写在函数外面
+	if (is_mode_change == 1)
+	{
+		switch (ch)
+		{
+			case 6:
+			{
+				*choose_which = 1;
+				break;
+			}
+		}
+	}
+
+	if(is_change == 0)// 由于只有屏幕参数改变时才需要判断能不能输出，故用if分流
+	{
+		// 先判断当前屏幕大小能不能支持状态栏，所以需要传y_max & x_max
+		// 得到x，y一共有几位	
+		int cnt = 0;
+		if (x == 0)cnt += 1;
+		if (y == 0)cnt += 1;
+		for(int num = x;num > 0;num /= 10) cnt++;
+		for(int num = y;num > 0;num /= 10) cnt++;
+		if ((y_max > 1) && (x_max >= (name_len + 1 + 7 + 1 + cnt + 1))) // 由于输出宽度不定，所以得先判断有多宽,1是“|”，“：”等符号
+		{
+			move(y_max-1, 0); 
+			clrtoeol();
+			// 还要维持上一次输出不变，引入一个新变量吧。
+			mvprintw(y_max - 1,0,"%s|%s|%d:%d",argv[1],mode[*choose_which],x,y);
+			return 0;
+		}
+		else
+		{
+			return -1;// 无法显示，什么都不做
+		}
+	}
+	else if(is_change == 1)
+	{
+		move(y_max-1, 0); 
+		clrtoeol();
+		mvprintw(y_max - 1,0,"%s|%s|%d:%d",argv[1],mode[*choose_which],x,y);
+		return 0;
+	}
+}
 
 
 
@@ -743,8 +806,19 @@ int main(int argc,char *argv[])
 		// lchar *User_Input = NULL;
 		// int	Input_len = 0;
 
+		// 状态栏相关量，获取文件名
+		int name_len = strlen(argv[1]); // 先不考虑中文的情况
+		int choose_which = 0;
+
+		int txt_y = y_max;
+
 		// 在执行while前得先输出一次，先把没初始化好的基本量初始化
-		int yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx); // yx_len是最大行数
+		inter = win_state(y_max,x_max,x,y,ch,argv,name_len,0,0,&choose_which);
+		if (inter == 0)
+		{
+			txt_y = y_max - 1;
+		}
+		int yx_len = show_txt(arr,len,x_max,txt_y,Where_Start,&ylinkx); // yx_len是最大行数
 		if (yx_len == -1)
 		{
 			endwin();
@@ -758,6 +832,9 @@ int main(int argc,char *argv[])
 			perror("realloc");
 			return 1;
 		}
+		inter = win_state(y_max,x_max,x,y,ch,argv,name_len,0,0,&choose_which);
+
+		move(0,0);
 
 		while ((ch = getch()) != 17)
 		{
@@ -769,6 +846,15 @@ int main(int argc,char *argv[])
 				// 更新屏幕参数
 				x_max = new_x_max;
 				y_max = new_y_max;
+				inter = win_state(y_max,x_max,x,y,ch,argv,name_len,1,0,&choose_which);
+				if (inter == 0)
+				{
+					txt_y = y_max - 1;
+				}
+				else
+				{
+					txt_y = y_max;
+				}
 				row_index = read_txt(arr,len,x_max,&row_counter);
 				if (row_index == -1)
 				{
@@ -778,21 +864,30 @@ int main(int argc,char *argv[])
 				}
 
 				// 重新输出文本内容
-				yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+				yx_len = show_txt(arr,len,x_max,txt_y,Where_Start,&ylinkx);
 				if (yx_len == -1)
 				{
 					endwin();
 					perror("realloc");
 					return 1;
 				}
+
+				// 补丁：光标显示坐标
+				if (y >txt_y - 1)
+				{
+					y = txt_y - 1;
+					if (x > ylinkx[y])x = ylinkx[y];
+				}
+				if (x > ylinkx[y])x = ylinkx[y];
+
+				inter = win_state(y_max,x_max,x,y,ch,argv,name_len,0,0,&choose_which);
 			}
 			else // 控制光标移动，重新输出文本内容
 			{
 				// 控制光标移动，记得改判断条件
 				switch(ch) // 当光标超过边界时，需要重新输出文本内容
 				{
-					case KEY_UP: // 这样会不会直接插入中文内部啊？后面调试有bugger来这修——看来是会的。
-						//
+					case KEY_UP: // 这样会不会直接插入中文内部啊？后面调试有bug来这修——看来是会的。
 						if (y > 0)
 						{
 							y--;
@@ -800,7 +895,7 @@ int main(int argc,char *argv[])
 
 							// 需要考虑不能超出文本范围，所以要判断x坐标要不要移动
 							if (x > ylinkx[y]) x = ylinkx[y];
-							else Where_x_Going_to(&x,Cur_True_Location,Cur_True_Location + 1,row_counter,arr,ch);
+							else Where_x_Going_to(&x,Cur_True_Location,Cur_True_Location + 1,row_counter,arr,ch,ylinkx);
 						}
 						else // 继续往上，需要计算起始坐标量
 						{
@@ -811,7 +906,7 @@ int main(int argc,char *argv[])
 							if (Cur_True_Location == 0) break;
 							Where_Start = row_counter[Cur_True_Location - 1];
 							Cur_True_Location--;
-							yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+							yx_len = show_txt(arr,len,x_max,txt_y,Where_Start,&ylinkx);
 							if (yx_len == -1)
 							{
 								endwin();
@@ -819,8 +914,9 @@ int main(int argc,char *argv[])
 								return 1;
 							}
 							if (x > ylinkx[y]) x = ylinkx[y];
-							else Where_x_Going_to(&x,Cur_True_Location,Cur_True_Location + 1,row_counter,arr,ch);
+							else Where_x_Going_to(&x,Cur_True_Location,Cur_True_Location + 1,row_counter,arr,ch,ylinkx);
 						}
+						inter = win_state(y_max,x_max,x,y,ch,argv,name_len,0,0,&choose_which);
 						break;
 					case KEY_DOWN: // 需要注意，如果已到文档底部，那用户再按下键应该没有任何操作.
 						if (y < yx_len - 1)
@@ -837,7 +933,7 @@ int main(int argc,char *argv[])
 						{
 							Where_Start = row_counter[Cur_True_Location - yx_len + 2];
 							Cur_True_Location++;
-							yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+							yx_len = show_txt(arr,len,x_max,txt_y,Where_Start,&ylinkx);
 							if (yx_len == -1)
 							{
 								endwin();
@@ -846,10 +942,11 @@ int main(int argc,char *argv[])
 							}
 						}
 						if (x > ylinkx[y]) x = ylinkx[y];
-						else Where_x_Going_to(&x,Cur_True_Location,Cur_True_Location - 1,row_counter,arr,ch);
+						else Where_x_Going_to(&x,Cur_True_Location,Cur_True_Location - 1,row_counter,arr,ch,ylinkx);
+						inter = win_state(y_max,x_max,x,y,ch,argv,name_len,0,0,&choose_which);
 						break;
 					case KEY_LEFT: // 还需要写水平移动的功能
-						if (x > 0)Where_x_Going_to(&x,Cur_True_Location,Cur_True_Location,row_counter,arr,ch);
+						if (x > 0)Where_x_Going_to(&x,Cur_True_Location,Cur_True_Location,row_counter,arr,ch,ylinkx);
 						else// 需要先判断是否顶格
 						{
 							if (y > 0)
@@ -863,7 +960,7 @@ int main(int argc,char *argv[])
 								if (Cur_True_Location == 0) break;
 								Where_Start = row_counter[Cur_True_Location - 1];
 								Cur_True_Location--;
-								yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+								yx_len = show_txt(arr,len,x_max,txt_y,Where_Start,&ylinkx);
 								if (yx_len == -1)
 								{
 									endwin();
@@ -873,9 +970,10 @@ int main(int argc,char *argv[])
 								x = ylinkx[y];
 							}
 						}
+						inter = win_state(y_max,x_max,x,y,ch,argv,name_len,0,0,&choose_which);
 						break;
 					case KEY_RIGHT:
-						if (x < ylinkx[y])Where_x_Going_to(&x,Cur_True_Location,Cur_True_Location,row_counter,arr,ch);
+						if (x < ylinkx[y])Where_x_Going_to(&x,Cur_True_Location,Cur_True_Location,row_counter,arr,ch,ylinkx);
 						else
 						{
 							if (y < (yx_len - 1))
@@ -888,7 +986,7 @@ int main(int argc,char *argv[])
 							{
 								Where_Start = row_counter[Cur_True_Location - yx_len + 2];
 								Cur_True_Location++;
-								yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+								yx_len = show_txt(arr,len,x_max,txt_y,Where_Start,&ylinkx);
 								if (yx_len == -1)
 								{
 									endwin();
@@ -898,6 +996,7 @@ int main(int argc,char *argv[])
 							}
 							x = 0;
 						}
+						inter = win_state(y_max,x_max,x,y,ch,argv,name_len,0,0,&choose_which);
 						break;
 					case 263:
 						inter = Backspace(&Where_Start,&arr,&freq,&len,Cur_True_Location,&row_counter,&x,y);
@@ -917,7 +1016,7 @@ int main(int argc,char *argv[])
 						{
 							y--;
 							Cur_True_Location--;
-							yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+							yx_len = show_txt(arr,len,x_max,txt_y,Where_Start,&ylinkx);
 							if (yx_len == -1)
 							{
 								endwin();
@@ -928,7 +1027,7 @@ int main(int argc,char *argv[])
 						else if(inter == -4)
 						{
 							Cur_True_Location--;
-							yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+							yx_len = show_txt(arr,len,x_max,txt_y,Where_Start,&ylinkx);
 							if (yx_len == -1)
 							{
 								endwin();
@@ -939,7 +1038,7 @@ int main(int argc,char *argv[])
 						else
 						{
 							x -= inter;
-							yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+							yx_len = show_txt(arr,len,x_max,txt_y,Where_Start,&ylinkx);
 							if (yx_len == -1)
 							{
 								endwin();
@@ -947,22 +1046,23 @@ int main(int argc,char *argv[])
 								return 1;
 							}
 						}
-
+						inter = win_state(y_max,x_max,x,y,ch,argv,name_len,0,0,&choose_which);
 						break;
 					case 330:
 						// 删后面的应该不用移动光标
 						Del(&Where_Start,&arr,&freq,&len,Cur_True_Location,&row_counter,&x);
 						row_index = read_txt(arr,len,x_max,&row_counter);
-						yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+						yx_len = show_txt(arr,len,x_max,txt_y,Where_Start,&ylinkx);
 						if (yx_len == -1)
 							{
 								endwin();
 								perror("realloc");
 								return 1;
 							}
+						inter = win_state(y_max,x_max,x,y,ch,argv,name_len,0,0,&choose_which);
 						break;
 					default:
-						inter = InsertString(&arr,&len,&freq,Cur_True_Location,&row_counter,&row_index,&x,&y,ch,x_max,y_max,&Where_Start);
+						inter = InsertString(&arr,&len,&freq,Cur_True_Location,&row_counter,&row_index,&x,&y,ch,x_max,txt_y,&Where_Start);
 
 						if (inter == -1)
 						{
@@ -981,20 +1081,21 @@ int main(int argc,char *argv[])
 							y++;
 						}
 
-						yx_len = show_txt(arr,len,x_max,y_max,Where_Start,&ylinkx);
+						yx_len = show_txt(arr,len,x_max,txt_y,Where_Start,&ylinkx);
 						if (yx_len == -1)
 						{
 							endwin();
 							perror("realloc");
 							return 1;
 						}
+						inter = win_state(y_max,x_max,x,y,ch,argv,name_len,0,0,&choose_which);
 						break;
 				}
-				move(y,x);
-				refresh();
-
 				// 移动显示区域
 			}
+			// 注意要先调用win_state再移动光标，否则光标会锁死在状态栏末尾
+			move(y,x);
+			refresh();
 		}
 		free(arr);
 		fclose(file);
