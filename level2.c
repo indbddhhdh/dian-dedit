@@ -729,12 +729,151 @@ int win_state(int y_max,int x_max,int x,int y,int ch,char** argv,int name_len,in
 
 // 等等，状态栏的模式代码优先级应该要大于一般交互代码，而退出代码的优先级应该也要大于状态栏模式代码。而且交互后要返回NORMAL。所以main函数里还需要多一层判断.
 
-// void is_file_saved
 
-// int Save_File()
-// {
-// 	return 1;
-// }
+
+// 3.1代码内容
+// 需求：输⼊ Ctrl-F 开启搜索功能，在搜索模式下：⽤⼾可以在状态栏上⾯⼀栏输⼊⽂字，作为搜索词汇；状态栏显⽰为搜索状态。按下 Enter 将搜索词汇匹配，⾼亮显⽰。
+// 本质上是字母串匹配，可以试试数据结构课上的KMP算法
+// 需要定义两个函数，一个获取模式串，一个匹配
+// 如果想让开启搜索模式后能单独在倒数第二行输入，还需要有一个判断来强制把用户的输入拿走
+
+// 获得用户输入
+// 考虑到屏幕大小限制，需要限制用户输入的内容长度,预先定义一个数组，然后限制条件为数组下标长度和屏幕宽度
+// 模式串要和arr匹配，所以要是lchar类型的，而且需要获得模式串长度
+void get_user_input(int ch,lchar *pattern_string,int pattern_general_len,int *pattern_str_len,int *pattern_str_width,int x_max,int y_max)
+{
+	// 判断是不是首字节
+	if (check_type(ch) != -1)
+	{
+		// 判断能否装下
+		if ((*pattern_str_width + get_width(ch)) > x_max) // 超出屏幕宽度
+		{
+			return;
+		}
+		else
+		{
+			if ((*pattern_str_len + check_type(ch)) > (pattern_general_len)) // 超出数组宽度
+			{
+				return;
+			}
+			else
+			{
+				*pattern_str_len += 1;
+				pattern_string[*pattern_str_len - 1] = (lchar)ch;
+				*pattern_str_width += get_width(ch);
+			}
+		}
+	}
+	else // 直接输入
+	{
+		*pattern_str_len += 1;
+		pattern_string[*pattern_str_len - 1] = ch;
+	}
+	
+
+	// 将当前已有的输出到倒数第二行
+	if (*pattern_str_len > 0) // 判断有没有东西
+	{
+		move(y_max - 2,0);
+		clrtoeol();
+		int start_index = 0;
+		while ((start_index + check_type(pattern_string[start_index]) <= *pattern_str_len))
+		{
+			char output_string[check_type(pattern_string[start_index]) + 1];
+			output_string[check_type(pattern_string[start_index])] = '\0';
+			for (int i = 0;i < check_type(pattern_string[start_index]);i++) // 把要输出的字符先存到output_string
+			{
+				output_string[i] = pattern_string[start_index + i];
+			}
+			printw("%s",output_string);
+			start_index += check_type(pattern_string[start_index]);
+		}
+		refresh();
+	}
+}
+
+// 生成next
+void compute_next(char *pattern_string,int pattern_str_len, int *next) 
+{
+    next[0] = 0;
+    int k = 0;
+    for (int i = 1;i < pattern_str_len;i++) 
+	{
+        while (k > 0 && pattern_string[k] != pattern_string[i]) k = next[k - 1];
+        if (pattern_string[k] == pattern_string[i]) k++;
+        next[i] = k;
+    }
+}
+
+
+// kmp匹配
+int kmp_search(char *arr,int len,char *pattern_string,int pattern_str_len,int *Where_Start_Search) 
+{
+    int next[pattern_str_len];
+    compute_next(pattern_string, pattern_str_len, next);
+
+    int j = 0;
+    for (int i = *Where_Start_Search; i < len; i++) 
+	{
+        while (j > 0 && arr[i] != pattern_string[j]) j = next[j - 1];
+        if (arr[i] == pattern_string[j]) j++;
+        if (j == pattern_str_len) return i - pattern_str_len + 1; // 匹配位置
+    }
+    return -1; // 未找到
+}
+
+// 借鉴的代码真好用（
+
+// 实现基本功能：
+// 打开搜索功能后光标要移动到倒数第二行，并且倒数第二行要清空。
+// 再次按下enter后要切换到下一个候选，本质是从匹配位置末尾继续找？从匹配下标的下一个开始吧。
+void find_matching(int *Where_Start_Search,lchar *pattern_string,int pattern_str_len,lchar *arr,int len,int *row_counter,int row_index,int x_max,int y_max,int *Where_Start,int **ylinkx,int txt_y,int *yx_len)
+{
+	// 按下回车找下一个，但是第一次回车是进入搜索，第二次之后才是找下一个，所以还需要一个量来记录。哦，不需要。但是需要有一个量来决定每次开始找的位置，并且这个位置不能超出文本
+	int find_location = kmp_search(arr,len,pattern_string,pattern_str_len,Where_Start_Search);
+	if (find_location == -1) return;// 什么都不做
+
+	// 修改下一次开始找的位置
+	if ((find_location + check_type(arr[find_location])) > (len - 1)){} // 超过数组长度，什么都不做
+	else *Where_Start_Search = find_location + check_type(arr[find_location]);
+
+	// 找到这个下标在哪,将画面切到这里.先找到从第几行开始,所以还需要每行下标的代码
+	int row = 0;
+	while ((row_counter[row] <= find_location) && ((row + 1) <= (row_index - 1)))
+	{
+		if (row_counter[row + 1] > find_location) break;
+		row++;
+	}
+
+	// 确定如何重新显示，首先需要屏幕高度不小于三，这个得趁早判断.
+	// 如果进入search后屏幕大小改变导致相关界面无法显示，那内置mode是回到normal还是保留呢？回到normal吧。
+	// 还要注意是否触底，优先直接从该行开始显示。
+	// 光标跳转到所在行，如果要重新搜索则先退出再重新进入search
+
+	// 判断是否触底
+	if ((row + txt_y - 1) < row_index)
+	{
+		*Where_Start = row_counter[row];
+		*yx_len = show_txt(arr,len,x_max,txt_y,*Where_Start,ylinkx);
+		move(0,0);
+	}
+	else
+	{
+		if ((row_index - txt_y) > 0)
+		{
+			*Where_Start = row_counter[row_index - txt_y];
+			*yx_len = show_txt(arr,len,x_max,txt_y,*Where_Start,ylinkx);
+			move(txt_y - row_index - row,0);
+	
+		}
+		else
+		{
+			*Where_Start = 0;
+			*yx_len = show_txt(arr,len,x_max,txt_y,*Where_Start,ylinkx);
+			move(row,0);
+		}
+	}
+}
 
 
 
@@ -857,6 +996,14 @@ int main(int argc,char *argv[])
 		// 2.4相关变量
 		int exit_time = 2;
 
+		// 3.1相关变量
+		lchar pattern_string[256];
+		int pattern_general_len = 256;
+		int pattern_str_len = 0;
+		int pattern_str_width = 0;
+		int force_search = 0; // 控制强制锁定在search模式的变量
+		int Where_Start_Search = 0;
+
 		// 在执行while前得先输出一次，先把没初始化好的基本量初始化
 		inter = win_state(y_max,x_max,x,y,ch,argv,name_len,0,0,&choose_which);
 		if (inter == 0)
@@ -897,10 +1044,24 @@ int main(int argc,char *argv[])
 				if (inter == 0)
 				{
 					txt_y = y_max - 1;
+
+					if (y_max < 3)
+					{
+						win_state(y_max,x_max,x,y,27,argv,name_len,0,1,&choose_which);
+						force_search = 0;
+						pattern_str_len = 0;
+						pattern_str_width = 0;
+					}
 				}
 				else
 				{
 					txt_y = y_max;
+
+					// 搜索相关量需要重置
+					win_state(y_max,x_max,x,y,27,argv,name_len,0,1,&choose_which);
+					force_search = 0;
+					pattern_str_len = 0;
+					pattern_str_width = 0;
 				}
 				row_index = read_txt(arr,len,x_max,&row_counter);
 				if (row_index == -1)
@@ -929,13 +1090,29 @@ int main(int argc,char *argv[])
 
 				inter = win_state(y_max,x_max,x,y,ch,argv,name_len,0,0,&choose_which);
 			}
+			else if ((force_search == 1) && (ch != 27))
+			{
+				if (ch != 10) // 判断有没有按下回车，如果回车则开始匹配并返回
+				{
+					get_user_input(ch,pattern_string,pattern_general_len,&pattern_str_len,&pattern_str_width,x_max,y_max);
+				}
+				else
+				{
+					find_matching(&Where_Start_Search,pattern_string,pattern_str_len,arr,len,row_counter,row_index,x_max,y_max,&Where_Start,&ylinkx,txt_y,&yx_len);
+				}
+			}
 			else // 状态栏代码
 			{	
 				if ((ch == 17) && (exit_time ==2)) break;
 				switch(ch)
 				{
 					case 6:
+						if(y_max < 3)break;
+						txt_y -= 1;
+						yx_len = show_txt(arr,len,x_max,txt_y,Where_Start,&ylinkx);
+						move(y_max - 2,0);
 						win_state(y_max,x_max,x,y,ch,argv,name_len,0,1,&choose_which);
+						force_search = 1;
 						break;
 					case 18:
 						win_state(y_max,x_max,x,y,ch,argv,name_len,0,1,&choose_which);
@@ -971,6 +1148,17 @@ int main(int argc,char *argv[])
 
 						break;
 					case 27:
+						if (force_search == 1)// 如果不加的话txt_y会一直增长
+						{
+							// 让文件回到开头
+							force_search = 0;
+							txt_y += 1;
+							pattern_str_len = 0;
+							pattern_str_width = 0;
+							Where_Start_Search = 0;
+							Where_Start = 0;
+							yx_len = show_txt(arr,len,x_max,txt_y,Where_Start,&ylinkx);
+						}
 						win_state(y_max,x_max,x,y,ch,argv,name_len,0,1,&choose_which);
 						break;
 					default: // 控制光标移动，重新输出文本内容
@@ -1194,7 +1382,7 @@ int main(int argc,char *argv[])
 				}	
 			}
 			// 注意要先调用win_state再移动光标，否则光标会锁死在状态栏末尾
-			move(y,x);
+			if(force_search == 0)move(y,x);
 			refresh();
 		}
 		free(arr);
