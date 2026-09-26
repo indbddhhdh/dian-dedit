@@ -444,7 +444,7 @@ int InsertString(lchar **arr,int *len,int *freq,int Cur_True_Location,int **row_
 			*x = 0;
 			return -2; // whereStart需要动
 		}
-		else if ((*x + get_width(ch) > x_max) && (*y < y_max))
+		else if ((*x + get_width(ch) > x_max) && (*y < y_max - 1))
 		{
 			*x = 0;
 			(*y)++;
@@ -488,15 +488,16 @@ int Backspace(int *Where_Start,lchar **arr,int *freq,int *len,int Cur_True_Locat
 		Left_Location = 0;
 	// 从上一行开始数
 
-		while ((Left_index + check_type((*arr)[Left_index])) < (*row_counter)[Cur_True_Location]) // 要找到光标左侧的第一个字节的下标，需要注意是不是换行符 // 不对，就算是换行符也能正常运算
+		while (((Left_index + check_type((*arr)[Left_index])) < (*row_counter)[Cur_True_Location])) // 要找到光标左侧的第一个字节的下标，需要注意是不是换行符 // 不对，就算是换行符也能正常运算
 		{
-				Left_Location += get_width((*arr)[Left_index]);
+				if ((*arr)[Left_index] != '\n')Left_Location += get_width((*arr)[Left_index]);
 				Left_index += check_type((*arr)[Left_index]);
 		}
 	}
 
 	// 记录被删去的字符
-	int bk_width = get_width((*arr)[Left_index]);
+	int bk_width = 0;
+	if ((*arr)[Left_index] != '\n')bk_width = get_width((*arr)[Left_index]);
 	int bk_type = check_type((*arr)[Left_index]);
 
 	int move_index = Left_index;
@@ -793,7 +794,7 @@ void get_user_input(int ch,lchar *pattern_string,int pattern_general_len,int *pa
 }
 
 // 生成next
-void compute_next(char *pattern_string,int pattern_str_len, int *next) 
+void compute_next(char *pattern_string,int pattern_str_len,int *next) 
 {
     next[0] = 0;
     int k = 0;
